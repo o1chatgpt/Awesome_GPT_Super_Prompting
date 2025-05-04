@@ -1,20 +1,18 @@
 import { createClient } from "@supabase/supabase-js"
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+// Initialize the Supabase client
+export const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
-
-// Type definitions for our database tables
-export type User = {
+// Define database types
+export type Profile = {
   id: string
   email: string
+  username: string
   full_name: string
-  username?: string
-  avatar_url?: string
+  role: "admin" | "user" | "viewer"
   created_at: string
-  role: "user" | "admin" | "viewer"
+  updated_at: string
+  last_sign_in: string | null
   is_active: boolean
 }
 
@@ -22,29 +20,47 @@ export type ScrapingTask = {
   id: string
   user_id: string
   url: string
-  content_type: string
-  depth: string
-  format: string
-  schedule_type: string
-  schedule_frequency?: string
-  schedule_time?: string
-  schedule_day?: string
-  status: "pending" | "in_progress" | "completed" | "failed" | "scheduled" | "paused"
-  last_run?: string
-  next_run?: string
+  status: "pending" | "in_progress" | "completed" | "failed"
   created_at: string
   updated_at: string
+  completed_at: string | null
+  result_id: string | null
+  schedule: string | null
+  proxy_id: string | null
 }
 
 export type ScrapingResult = {
   id: string
   task_id: string
-  user_id: string
-  raw_data: string
-  formatted_data?: string
-  ai_analysis?: string
-  error?: string
+  content: any
   created_at: string
+  metadata: any
+}
+
+export type Proxy = {
+  id: string
+  host: string
+  port: number
+  username: string | null
+  password: string | null
+  protocol: "http" | "https" | "socks4" | "socks5"
+  is_active: boolean
+  last_used: string | null
+  success_count: number
+  failure_count: number
+  created_at: string
+  updated_at: string
+}
+
+export type Memory = {
+  id: string
+  content: string
+  metadata: any
+  created_at: string
+  updated_at: string
+  user_id: string
+  importance: number
+  category: string
 }
 
 export type TaskRating = {
@@ -52,40 +68,27 @@ export type TaskRating = {
   task_id: string
   user_id: string
   rating: number
-  feedback?: string
+  feedback: string | null
   created_at: string
 }
 
-export type Memory = {
+export type Invitation = {
   id: string
-  user_id: string
-  content: string
-  type: string
-  relevance: number
-  metadata?: Record<string, any>
-  is_admin_visible: boolean
+  email: string
+  role: "admin" | "user" | "viewer"
+  token: string
+  invited_by: string
   created_at: string
+  expires_at: string
+  used_at: string | null
+  inviter?: Profile
 }
 
 export type UserActivity = {
   id: string
   user_id: string
   action: string
-  resource_type: string
-  resource_id?: string
-  details?: Record<string, any>
+  details: any
   created_at: string
-}
-
-// Add this type definition after the UserActivity type
-
-export type Invitation = {
-  id: string
-  email: string
-  role: "user" | "admin" | "viewer"
-  token: string
-  invited_by: string
-  created_at: string
-  expires_at: string
-  used_at?: string
+  ip_address: string | null
 }

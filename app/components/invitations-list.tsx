@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { toast } from "@/components/ui/use-toast"
 import { getInvitations, resendInvitation, cancelInvitation } from "@/lib/actions/invitations"
-import { Mail, X, Copy, Check } from "lucide-react"
+import { Copy, RefreshCw, Trash2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogContent,
@@ -17,14 +17,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import type { Invitation } from "@/lib/database"
 
 export function InvitationsList() {
-  const [invitations, setInvitations] = useState<any[]>([])
+  const [invitations, setInvitations] = useState<Invitation[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedInvitation, setSelectedInvitation] = useState<string | null>(null)
-  const [invitationLink, setInvitationLink] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [resendDialogOpen, setResendDialogOpen] = useState(false)
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+  const [selectedInvitation, setSelectedInvitation] = useState<Invitation | null>(null)
+  const [newInvitationLink, setNewInvitationLink] = useState<string | null>(null)
+  const [actionInProgress, setActionInProgress] = useState(false)
 
   useEffect(() => {
     loadInvitations()
@@ -32,81 +35,138 @@ export function InvitationsList() {
 
   const loadInvitations = async () => {
     setLoading(true)
-    const result = await getInvitations()
-    setLoading(false)
-
-    if (result.error) {
+    try {
+      const result = await getInvitations()
+      if (result.error) {
+        toast({
+          title: "Error",
+          description: result.error,
+          variant: "destructive",
+        })
+      } else {
+        setInvitations(result.invitations || [])
+      }
+    } catch (error) {
       toast({
         title: "Error",
-        description: result.error,
+        description: "Failed to load invitations",
         variant: "destructive",
       })
-      return
+    } finally {
+      setLoading(false)
     }
-
-    setInvitations(result.invitations || [])
   }
 
-  const handleResendInvitation = async (id: string) => {
-    setSelectedInvitation(id)
-    const result = await resendInvitation(id)
+  const handleResend = (invitation: Invitation) => {
+    setSelectedInvitation(invitation)
+    setResendDialogOpen(true)
+  }
 
-    if (result.error) {
+  const handleCancel = (invitation: Invitation) => {
+    setSelectedInvitation(invitation)
+    setCancelDialogOpen(true)
+  }
+
+  const confirmResend = async () => {
+    if (!selectedInvitation) return
+
+    setActionInProgress(true)
+    try {
+      const result = await resendInvitation(selectedInvitation.id)
+      if (result.error) {
+        toast({
+          title: "Error",
+          description: result.error,
+          variant: "destructive",
+        })
+      } else {
+        setNewInvitationLink(result.invitationLink)
+        toast({
+          title: "Invitation Resent",
+          description: "The invitation has been resent successfully.",
+        })
+        await loadInvitations()
+      }
+    } catch (error) {
       toast({
         title: "Error",
-        description: result.error,
+        description: "Failed to resend invitation",
         variant: "destructive",
       })
-      setSelectedInvitation(null)
-      return
+    } finally {
+      setActionInProgress(false)
     }
+  }
 
-    setInvitationLink(result.invitationLink)
-    setDialogOpen(true)
+  const confirmCancel = async () => {
+    if (!selectedInvitation) return
+
+    setActionInProgress(true)
+    try {
+      const result = await cancelInvitation(selectedInvitation.id)
+      if (result.error) {
+        toast({
+          title: "Error",
+          description: result.error,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Invitation Cancelled",
+          description: "The invitation has been cancelled successfully.",
+        })
+        setInvitations(invitations.filter((inv) => inv.id !== selectedInvitation.id))
+        setCancelDialogOpen(false)
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to cancel invitation",
+        variant: "destructive",
+      })
+    } finally {
+      setActionInProgress(false)
+    }
+  }
+
+  const handleCopyLink = () => {
+    if (newInvitationLink) {
+      navigator.clipboard.writeText(newInvitationLink)
+      toast({
+        title: "Copied",
+        description: "Invitation link copied to clipboard",
+      })
+    }
+  }
+
+  const closeResendDialog = () => {
+    setResendDialogOpen(false)
     setSelectedInvitation(null)
-    await loadInvitations()
-  }
-
-  const handleCancelInvitation = async (id: string) => {
-    setSelectedInvitation(id)
-    const result = await cancelInvitation(id)
-    setSelectedInvitation(null)
-
-    if (result.error) {
-      toast({
-        title: "Error",
-        description: result.error,
-        variant: "destructive",
-      })
-      return
-    }
-
-    toast({
-      title: "Invitation Cancelled",
-      description: "The invitation has been cancelled successfully",
-    })
-
-    await loadInvitations()
-  }
-
-  const copyToClipboard = () => {
-    if (invitationLink) {
-      navigator.clipboard.writeText(invitationLink)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }
+    setNewInvitationLink(null)
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
+    return new Date(dateString).toLocaleString()
   }
 
   const isExpired = (expiresAt: string) => {
     return new Date(expiresAt) < new Date()
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Pending Invitations</CardTitle>
+          <CardDescription>Manage user invitations</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center p-4">
+            <div className="animate-pulse">Loading invitations...</div>
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -114,17 +174,11 @@ export function InvitationsList() {
       <Card>
         <CardHeader>
           <CardTitle>Pending Invitations</CardTitle>
-          <CardDescription>Manage your pending user invitations</CardDescription>
+          <CardDescription>Manage user invitations</CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-pulse">Loading invitations...</div>
-            </div>
-          ) : invitations.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground">No pending invitations</p>
-            </div>
+          {invitations.length === 0 ? (
+            <div className="text-center py-4 text-muted-foreground">No pending invitations</div>
           ) : (
             <Table>
               <TableHeader>
@@ -140,33 +194,13 @@ export function InvitationsList() {
               <TableBody>
                 {invitations.map((invitation) => (
                   <TableRow key={invitation.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Mail className="h-4 w-4 text-muted-foreground" />
-                        <span>{invitation.email}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={
-                          invitation.role === "admin"
-                            ? "border-blue-500 text-blue-500"
-                            : invitation.role === "user"
-                              ? "border-green-500 text-green-500"
-                              : "border-orange-500 text-orange-500"
-                        }
-                      >
-                        {invitation.role.charAt(0).toUpperCase() + invitation.role.slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {invitation.inviter?.full_name || invitation.inviter?.username || invitation.inviter?.email}
-                    </TableCell>
+                    <TableCell>{invitation.email}</TableCell>
+                    <TableCell className="capitalize">{invitation.role}</TableCell>
+                    <TableCell>{invitation.inviter?.full_name || "Unknown"}</TableCell>
                     <TableCell>{formatDate(invitation.expires_at)}</TableCell>
                     <TableCell>
                       {invitation.used_at ? (
-                        <Badge variant="default">Used</Badge>
+                        <Badge variant="outline">Used</Badge>
                       ) : isExpired(invitation.expires_at) ? (
                         <Badge variant="destructive">Expired</Badge>
                       ) : (
@@ -174,29 +208,26 @@ export function InvitationsList() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {!invitation.used_at && (
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleResendInvitation(invitation.id)}
-                            disabled={selectedInvitation === invitation.id}
-                          >
-                            <Mail className="h-4 w-4 mr-1" />
-                            Resend
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-500"
-                            onClick={() => handleCancelInvitation(invitation.id)}
-                            disabled={selectedInvitation === invitation.id}
-                          >
-                            <X className="h-4 w-4 mr-1" />
-                            Cancel
-                          </Button>
-                        </div>
-                      )}
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => handleResend(invitation)}
+                          disabled={!!invitation.used_at}
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                          <span className="sr-only">Resend</span>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => handleCancel(invitation)}
+                          disabled={!!invitation.used_at}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Cancel</span>
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -204,29 +235,68 @@ export function InvitationsList() {
             </Table>
           )}
         </CardContent>
+        <CardFooter className="flex justify-between">
+          <Button variant="outline" onClick={loadInvitations}>
+            Refresh
+          </Button>
+        </CardFooter>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      {/* Resend Dialog */}
+      <Dialog open={resendDialogOpen} onOpenChange={setResendDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Invitation Resent</DialogTitle>
+            <DialogTitle>Resend Invitation</DialogTitle>
             <DialogDescription>
-              The invitation has been resent successfully. Share this link with the user.
+              {!newInvitationLink
+                ? `Are you sure you want to resend the invitation to ${selectedInvitation?.email}?`
+                : "The invitation has been resent successfully."}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <div className="mb-4">
-              <div className="flex mt-2">
-                <Input value={invitationLink || ""} readOnly className="flex-1 pr-10" />
-                <Button type="button" variant="ghost" size="icon" className="-ml-10" onClick={copyToClipboard}>
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
+          {!newInvitationLink ? (
+            <DialogFooter>
+              <Button variant="outline" onClick={closeResendDialog} disabled={actionInProgress}>
+                Cancel
+              </Button>
+              <Button onClick={confirmResend} disabled={actionInProgress}>
+                {actionInProgress ? "Resending..." : "Resend"}
+              </Button>
+            </DialogFooter>
+          ) : (
+            <>
+              <div className="py-4">
+                <Label htmlFor="new-invitation-link">New Invitation Link</Label>
+                <div className="flex mt-1">
+                  <Input id="new-invitation-link" value={newInvitationLink} readOnly className="rounded-r-none" />
+                  <Button type="button" variant="secondary" className="rounded-l-none" onClick={handleCopyLink}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-              <p className="text-sm text-muted-foreground mt-2">This link will expire in 7 days.</p>
-            </div>
-          </div>
+              <DialogFooter>
+                <Button onClick={closeResendDialog}>Done</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Dialog */}
+      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel Invitation</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to cancel the invitation to {selectedInvitation?.email}?
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter>
-            <Button onClick={() => setDialogOpen(false)}>Close</Button>
+            <Button variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={actionInProgress}>
+              No, Keep It
+            </Button>
+            <Button variant="destructive" onClick={confirmCancel} disabled={actionInProgress}>
+              {actionInProgress ? "Cancelling..." : "Yes, Cancel It"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

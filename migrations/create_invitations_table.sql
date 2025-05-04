@@ -4,13 +4,15 @@ CREATE TABLE IF NOT EXISTS invitations (
   email TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
   token TEXT NOT NULL UNIQUE,
-  invited_by UUID NOT NULL REFERENCES profiles(id),
+  invited_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   used_at TIMESTAMP WITH TIME ZONE,
-  UNIQUE(email)
+  
+  -- Add constraints
+  CONSTRAINT valid_role CHECK (role IN ('admin', 'user', 'viewer'))
 );
 
--- Add index for faster lookups
-CREATE INDEX IF NOT EXISTS invitations_email_idx ON invitations(email);
+-- Create index for faster lookups
 CREATE INDEX IF NOT EXISTS invitations_token_idx ON invitations(token);
+CREATE INDEX IF NOT EXISTS invitations_email_idx ON invitations(email);
