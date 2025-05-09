@@ -5,6 +5,7 @@ import type React from "react"
 import { Toaster } from "@/components/ui/toaster"
 import { SidebarLayout } from "./components/sidebar"
 import { ThemeProvider } from "./components/theme-provider"
+import { AuthProvider } from "./providers/auth-provider"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -23,10 +24,12 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <div className="flex flex-col min-h-screen">
-            <SidebarLayout>{children}</SidebarLayout>
-            <Toaster />
-          </div>
+          <AuthProvider>
+            <div className="flex flex-col min-h-screen">
+              <SidebarLayout>{children}</SidebarLayout>
+              <Toaster />
+            </div>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

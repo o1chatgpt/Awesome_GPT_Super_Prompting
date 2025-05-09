@@ -5,9 +5,10 @@ import { supabase } from "@/lib/database"
 import { checkUserRole, getCurrentUser } from "./auth"
 import { v4 as uuidv4 } from "uuid"
 import { redirect } from "next/navigation"
+import { getDefaultTemplate, processTemplate } from "./templates"
 
 // Send an invitation to a new user
-export async function sendInvitation(email: string, role: "user" | "admin" | "viewer" = "user") {
+export async function sendInvitation(email: string, role: "user" | "admin" | "viewer" = "user", templateId?: string) {
   // Check if the current user is an admin
   const isAdmin = await checkUserRole("admin")
   if (!isAdmin) {
@@ -47,6 +48,23 @@ export async function sendInvitation(email: string, role: "user" | "admin" | "vi
     }
   }
 
+  // Get template (use provided template or default)
+  let template
+  if (templateId) {
+    const { data, error } = await supabase.from("invitation_templates").select("*").eq("id", templateId).single()
+
+    if (error) {
+      return { error: "Template not found" }
+    }
+    template = data
+  } else {
+    const result = await getDefaultTemplate()
+    if (result.error) {
+      return { error: result.error }
+    }
+    template = result.template
+  }
+
   // Generate a unique token
   const token = uuidv4()
 
@@ -63,6 +81,7 @@ export async function sendInvitation(email: string, role: "user" | "admin" | "vi
       token,
       invited_by: currentUser.id,
       expires_at: expiresAt.toISOString(),
+      template_id: template.id,
     })
     .select()
     .single()
@@ -71,15 +90,33 @@ export async function sendInvitation(email: string, role: "user" | "admin" | "vi
     return { error: error.message }
   }
 
-  // In a real application, you would send an email here
-  // For now, we'll just return the invitation link
+  // Generate invitation link
   const invitationLink = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/register?token=${token}`
+
+  // Process template with variables
+  const processedContent = processTemplate(template.content, {
+    role,
+    invitation_link: invitationLink,
+    inviter_name: currentUser.full_name,
+    email,
+  })
+
+  const processedSubject = processTemplate(template.subject, {
+    role,
+    inviter_name: currentUser.full_name,
+    email,
+  })
+
+  // In a real application, you would send an email here with the processed content
+  // For now, we'll just return the invitation link and processed content
 
   revalidatePath("/admin/users")
   return {
     success: true,
     invitation: data,
     invitationLink,
+    emailSubject: processedSubject,
+    emailContent: processedContent,
   }
 }
 

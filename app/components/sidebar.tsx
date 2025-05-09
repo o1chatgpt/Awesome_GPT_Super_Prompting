@@ -16,6 +16,7 @@ import {
   Search,
   Globe,
   Shield,
+  BrainCircuit,
 } from "lucide-react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -42,6 +43,7 @@ const secondaryNavItems: NavItem[] = [
   { title: "Team", href: "/team", icon: Users },
   { title: "Shared", href: "/shared", icon: Share2 },
   { title: "Proxies", href: "/proxies", icon: Globe },
+  { title: "AI Tools", href: "/ai-tools", icon: BrainCircuit },
   { title: "Settings", href: "/settings", icon: Settings },
 ]
 
@@ -49,6 +51,8 @@ const adminNavItems: NavItem[] = [
   { title: "Admin Dashboard", href: "/admin", icon: Shield },
   { title: "User Management", href: "/admin/users", icon: Users },
   { title: "Memory Management", href: "/admin/memories", icon: BarChart3 },
+  { title: "AI Settings", href: "/admin/ai-settings", icon: BrainCircuit },
+  { title: "Templates", href: "/admin/templates", icon: FileText },
 ]
 
 export function AppSidebar() {
@@ -130,7 +134,7 @@ export function AppSidebar() {
                     key={item.href}
                     href={item.href}
                     className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium ${
-                      pathname === item.href
+                      pathname === item.href || pathname.startsWith(`${item.href}/`)
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-muted"
                     }`}

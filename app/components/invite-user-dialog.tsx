@@ -1,8 +1,6 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -15,144 +13,205 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { toast } from "@/components/ui/use-toast"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { sendInvitation } from "@/lib/actions/invitations"
-import { Copy, UserPlus } from "lucide-react"
+import { getInvitationTemplates } from "@/lib/actions/templates"
+import { UserPlus, Copy, Check } from "lucide-react"
+import type { InvitationTemplate } from "@/lib/database"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export function InviteUserDialog() {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<"user" | "admin" | "viewer">("user")
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [templateId, setTemplateId] = useState<string>("")
+  const [templates, setTemplates] = useState<InvitationTemplate[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   const [invitationLink, setInvitationLink] = useState<string | null>(null)
+  const [emailContent, setEmailContent] = useState<string | null>(null)
+  const [emailSubject, setEmailSubject] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [activeTab, setActiveTab] = useState("link")
+  const [error, setError] = useState("")
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      if (!open) return
+
+      try {
+        const result = await getInvitationTemplates()
+        if (!result.error && result.templates) {
+          setTemplates(result.templates)
+
+          // Set default template if available
+          const defaultTemplate = result.templates.find((t) => t.is_default)
+          if (defaultTemplate) {
+            setTemplateId(defaultTemplate.id)
+          } else if (result.templates.length > 0) {
+            setTemplateId(result.templates[0].id)
+          }
+        } else if (result.error) {
+          setError(result.error)
+        }
+      } catch (err) {
+        setError("Failed to load templates")
+      }
+    }
+
+    fetchTemplates()
+  }, [open])
+
+  const handleInvite = async () => {
+    if (!email) {
+      setError("Please enter an email address")
+      return
+    }
+
+    setIsLoading(true)
+    setError("")
 
     try {
-      const result = await sendInvitation(email, role)
+      const result = await sendInvitation(email, role, templateId || undefined)
 
       if (result.error) {
-        toast({
-          title: "Error",
-          description: result.error,
-          variant: "destructive",
-        })
-      } else {
-        setInvitationLink(result.invitationLink)
-        toast({
-          title: "Invitation Sent",
-          description: "The invitation has been created successfully.",
-        })
+        setError(result.error)
+        return
       }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred.",
-        variant: "destructive",
-      })
+
+      setInvitationLink(result.invitationLink)
+      setEmailContent(result.emailContent)
+      setEmailSubject(result.emailSubject)
+    } catch (err) {
+      setError("An unexpected error occurred")
     } finally {
-      setIsSubmitting(false)
+      setIsLoading(false)
     }
   }
 
-  const handleCopyLink = () => {
+  const copyToClipboard = () => {
     if (invitationLink) {
       navigator.clipboard.writeText(invitationLink)
-      toast({
-        title: "Copied",
-        description: "Invitation link copied to clipboard",
-      })
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     }
   }
 
-  const handleClose = () => {
-    setOpen(false)
+  const resetForm = () => {
     setEmail("")
     setRole("user")
+    setTemplateId("")
     setInvitationLink(null)
+    setEmailContent(null)
+    setEmailSubject(null)
+    setActiveTab("link")
+    setError("")
+  }
+
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      resetForm()
+    }
+    setOpen(newOpen)
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button>
-          <UserPlus className="mr-2 h-4 w-4" />
+          <UserPlus className="h-4 w-4 mr-2" />
           Invite User
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>Invite User</DialogTitle>
-          <DialogDescription>Send an invitation to a new user to join the platform.</DialogDescription>
+          <DialogDescription>Send an invitation to a new user to join your web scraper platform.</DialogDescription>
         </DialogHeader>
+
+        {error && <div className="p-4 bg-destructive/10 text-destructive rounded-md mt-2">{error}</div>}
+
         {!invitationLink ? (
-          <form onSubmit={handleSubmit}>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="email" className="text-right">
-                  Email
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="col-span-3"
-                  required
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="role" className="text-right">
-                  Role
-                </Label>
-                <RadioGroup
-                  id="role"
-                  value={role}
-                  onValueChange={(value) => setRole(value as "user" | "admin" | "viewer")}
-                  className="col-span-3"
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="user" id="user" />
-                    <Label htmlFor="user">User</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="admin" id="admin" />
-                    <Label htmlFor="admin">Admin</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="viewer" id="viewer" />
-                    <Label htmlFor="viewer">Viewer</Label>
-                  </div>
-                </RadioGroup>
-              </div>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="role">Role</Label>
+              <Select value={role} onValueChange={(value) => setRole(value as "user" | "admin" | "viewer")}>
+                <SelectTrigger id="role">
+                  <SelectValue placeholder="Select a role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="viewer">Viewer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="template">Template</Label>
+              <Select value={templateId} onValueChange={setTemplateId}>
+                <SelectTrigger id="template">
+                  <SelectValue placeholder="Select a template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {template.name} {template.is_default ? "(Default)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <DialogFooter>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Sending..." : "Send Invitation"}
+              <Button onClick={handleInvite} disabled={isLoading}>
+                {isLoading ? "Sending..." : "Send Invitation"}
               </Button>
             </DialogFooter>
-          </form>
+          </div>
         ) : (
           <div className="py-4">
-            <div className="mb-4">
-              <Label htmlFor="invitation-link">Invitation Link</Label>
-              <div className="flex mt-1">
-                <Input id="invitation-link" value={invitationLink} readOnly className="rounded-r-none" />
-                <Button type="button" variant="secondary" className="rounded-l-none" onClick={handleCopyLink}>
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                Share this link with the user. The invitation will expire in 7 days.
-              </p>
-            </div>
-            <DialogFooter>
-              <Button type="button" onClick={handleClose}>
-                Done
-              </Button>
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="link">Invitation Link</TabsTrigger>
+                <TabsTrigger value="email">Email Preview</TabsTrigger>
+              </TabsList>
+              <TabsContent value="link" className="mt-4">
+                <div className="mb-4">
+                  <Label>Invitation Link</Label>
+                  <div className="flex mt-2">
+                    <Input value={invitationLink} readOnly className="flex-1 pr-10" />
+                    <Button type="button" variant="ghost" size="icon" className="-ml-10" onClick={copyToClipboard}>
+                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Share this link with the user. The link will expire in 7 days.
+                  </p>
+                </div>
+              </TabsContent>
+              <TabsContent value="email" className="mt-4">
+                <div className="border rounded-md p-4">
+                  <div className="mb-2 pb-2 border-b">
+                    <div className="font-semibold">Subject:</div>
+                    <div>{emailSubject}</div>
+                  </div>
+                  <div dangerouslySetInnerHTML={{ __html: emailContent || "" }} />
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">
+                  This is a preview of the email that would be sent to the user.
+                </p>
+              </TabsContent>
+            </Tabs>
+            <DialogFooter className="mt-4">
+              <Button onClick={() => setInvitationLink(null)}>Send Another Invitation</Button>
             </DialogFooter>
           </div>
         )}
