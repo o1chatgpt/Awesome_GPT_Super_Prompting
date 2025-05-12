@@ -5,6 +5,13 @@ import { cache } from "react"
 
 export const createServerSupabaseClient = cache(() => {
   const cookieStore = cookies()
+
+  // Check if environment variables are available
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    console.error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable")
+    throw new Error("Supabase URL is required. Please check your environment variables.")
+  }
+
   return createServerComponentClient<Database>({ cookies: () => cookieStore })
 })
 

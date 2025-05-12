@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js"
+import type { Database } from "@/types/supabase"
 
 // Define the types for our database tables
 export interface Profile {
@@ -103,25 +104,19 @@ export interface UserActivity {
   created_at: string
 }
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+// Check if the required environment variables are available
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error("Missing Supabase credentials:", {
-    url: supabaseUrl ? "Set" : "Missing",
-    key: supabaseKey ? "Set" : "Missing",
-  })
+if (!supabaseUrl) {
+  console.error("NEXT_PUBLIC_SUPABASE_URL is not defined")
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-})
+if (!supabaseAnonKey) {
+  console.error("NEXT_PUBLIC_SUPABASE_ANON_KEY is not defined")
+}
 
-console.log("Supabase client initialized with URL:", supabaseUrl)
+// Create a single supabase client for interacting with your database
+export const supabase = createClient<Database>(supabaseUrl || "", supabaseAnonKey || "")
 
 export type { Memory, UserActivity, ScrapingTask, ScrapingResult, TaskRating }
