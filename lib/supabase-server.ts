@@ -3,21 +3,21 @@ import { cookies } from "next/headers"
 import type { Database } from "@/types/supabase"
 import { cache } from "react"
 
+// Create a cached function to get the Supabase server client
 export const createServerSupabaseClient = cache(() => {
-  const cookieStore = cookies()
-
   // Check if environment variables are available
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    console.error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable")
-    throw new Error("Supabase URL is required. Please check your environment variables.")
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.error("Missing Supabase environment variables in server client")
+    throw new Error("Supabase environment variables are required. Please check your configuration.")
   }
 
+  const cookieStore = cookies()
   return createServerComponentClient<Database>({ cookies: () => cookieStore })
 })
 
 export async function getServerSession() {
-  const supabase = createServerSupabaseClient()
   try {
+    const supabase = createServerSupabaseClient()
     const {
       data: { session },
     } = await supabase.auth.getSession()
@@ -29,6 +29,11 @@ export async function getServerSession() {
 }
 
 export async function getServerUser() {
-  const session = await getServerSession()
-  return session?.user || null
+  try {
+    const session = await getServerSession()
+    return session?.user || null
+  } catch (error) {
+    console.error("Error getting server user:", error)
+    return null
+  }
 }

@@ -2,297 +2,286 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Loader2, Eye, EyeOff, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Loader2, Mail, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
-import { signInWithRememberMe, ensureUserProfile } from "@/lib/actions/auth"
-
-interface ValidationErrors {
-  identifier?: string
-  password?: string
-  form?: string
-}
+import { Separator } from "@/components/ui/separator"
+import { useAuth } from "@/app/providers/auth-provider"
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { FcGoogle } from "react-icons/fc"
+import { FaGithub } from "react-icons/fa"
+import { signInWithEmail } from "@/lib/actions/auth-actions"
+import { EnvChecker } from "@/app/components/env-checker"
 
 export default function SignInPage() {
-  const router = useRouter()
-  const [signInData, setSignInData] = useState({
-    identifier: "",
-    password: "",
-  })
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const [rememberMe, setRememberMe] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [serverError, setServerError] = useState<string | null>(null)
-  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({})
-  const [touched, setTouched] = useState<Record<string, boolean>>({})
-  const [showPassword, setShowPassword] = useState(false)
-  const [formSubmitted, setFormSubmitted] = useState(false)
-
-  // Validate form on input change
-  useEffect(() => {
-    if (Object.keys(touched).length > 0 || formSubmitted) {
-      validateForm()
-    }
-  }, [signInData, touched, formSubmitted])
-
-  const validateForm = () => {
-    const errors: ValidationErrors = {}
-
-    // Validate identifier (email or username)
-    if (!signInData.identifier) {
-      errors.identifier = "Username or email is required"
-    } else if (signInData.identifier.includes("@")) {
-      // If it looks like an email, validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (!emailRegex.test(signInData.identifier)) {
-        errors.identifier = "Please enter a valid email address"
-      }
-    } else if (signInData.identifier.length < 3) {
-      errors.identifier = "Username must be at least 3 characters"
-    }
-
-    // Validate password
-    if (!signInData.password) {
-      errors.password = "Password is required"
-    } else if (signInData.password.length < 6) {
-      errors.password = "Password must be at least 6 characters"
-    }
-
-    setValidationErrors(errors)
-    return Object.keys(errors).length === 0
-  }
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setSignInData((prev) => ({ ...prev, [name]: value }))
-
-    // Clear server error when user starts typing
-    if (serverError) {
-      setServerError(null)
-    }
-  }
-
-  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const { name } = e.target
-    setTouched((prev) => ({ ...prev, [name]: true }))
-  }
-
-  const togglePasswordVisibility = () => {
-    setShowPassword(!showPassword)
-  }
+  const [isPending, startTransition] = useTransition()
+  const [isGuestLoading, setIsGuestLoading] = useState(false)
+  const [isSocialLoading, setIsSocialLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [debugInfo, setDebugInfo] = useState<string | null>(null)
+  const router = useRouter()
+  const { enableGuestMode } = useAuth()
+  const supabase = createClientComponentClient()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setFormSubmitted(true)
+    setError(null)
+    setDebugInfo(null)
 
-    // Validate form before submission
-    if (!validateForm()) {
+    // Validate inputs
+    if (!email || !password) {
+      setError("Email and password are required")
       return
     }
 
-    setIsLoading(true)
-    setServerError(null)
+    // Use React's useTransition to handle the server action
+    startTransition(async () => {
+      try {
+        // Create a FormData object to pass to the server action
+        const formData = new FormData()
+        formData.append("email", email)
+        formData.append("password", password)
+        formData.append("rememberMe", rememberMe ? "on" : "off")
 
-    const formData = new FormData()
-    formData.append("identifier", signInData.identifier)
-    formData.append("password", signInData.password)
-    formData.append("rememberMe", rememberMe.toString())
+        // Call the server action
+        const result = await signInWithEmail(formData)
 
+        if (result.error) {
+          setError(result.error)
+          if (result.debug) {
+            setDebugInfo(result.debug)
+          }
+          return
+        }
+
+        // If successful, refresh the page and redirect
+        router.push("/dashboard")
+        router.refresh()
+      } catch (err: any) {
+        console.error("Client-side error during sign in:", err)
+        setError("An unexpected error occurred. Please try again.")
+        setDebugInfo(err.toString())
+      }
+    })
+  }
+
+  const handleSocialLogin = async (provider: "google" | "github") => {
     try {
-      console.log("Attempting sign in with:", signInData.identifier)
+      setIsSocialLoading(provider)
+      setError(null)
+      setDebugInfo(null)
 
-      // Call the server action and handle the response
-      const result = await signInWithRememberMe(formData)
-      console.log("Sign in result:", result)
+      // Get the current URL for the redirect
+      const redirectTo = `${window.location.origin}/auth/callback`
 
-      if (!result || typeof result !== "object") {
-        console.error("Invalid response format:", result)
-        setServerError("Received an invalid response from the server. Please try again.")
+      // Sign in with the selected provider
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo,
+          scopes: provider === "github" ? "user:email" : undefined,
+        },
+      })
+
+      if (error) {
+        console.error(`${provider} login error:`, error)
+        setError(error.message || `Failed to sign in with ${provider}`)
+        setDebugInfo(JSON.stringify(error, null, 2))
+        setIsSocialLoading(null)
         return
       }
 
-      if (!result.success) {
-        console.error("Sign in error:", result.error)
-        setServerError(result.error || "An error occurred during sign in")
-      } else {
-        if (result.user) {
-          try {
-            const profileResult = await ensureUserProfile(result.user.id, result.user.email || "")
-            if (!profileResult.success) {
-              console.error("Profile creation error:", profileResult.error)
-              // Continue anyway, as the user is still logged in
-            }
-          } catch (profileError) {
-            console.error("Error ensuring user profile:", profileError)
-            // Continue anyway, as the user is still logged in
-          }
-
-          console.log("Sign in successful, redirecting to dashboard...")
-          // Force a hard navigation instead of client-side navigation
-          window.location.href = "/dashboard"
-        } else {
-          setServerError("User information not found in the response")
-        }
-      }
-    } catch (error) {
-      console.error("Unexpected sign in error:", error)
-      setServerError("An unexpected error occurred. Please try again.")
-    } finally {
-      setIsLoading(false)
+      // The user will be redirected to the provider's login page
+    } catch (err: any) {
+      console.error(`${provider} login error:`, err)
+      setError(`Failed to sign in with ${provider}. Please try again.`)
+      setDebugInfo(err.toString())
+      setIsSocialLoading(null)
     }
   }
 
-  // Helper function to determine if a field has an error
-  const hasError = (field: keyof ValidationErrors) => {
-    return (touched[field] || formSubmitted) && !!validationErrors[field]
-  }
-
-  // Helper function to determine if a field is valid
-  const isValid = (field: keyof ValidationErrors) => {
-    return (touched[field] || formSubmitted) && !validationErrors[field] && signInData[field as keyof typeof signInData]
+  const handleGuestMode = () => {
+    setIsGuestLoading(true)
+    try {
+      enableGuestMode()
+      router.push("/dashboard")
+    } catch (error: any) {
+      console.error("Error enabling guest mode:", error)
+      setError("Failed to enable guest mode. Please try again.")
+      setDebugInfo(error.toString())
+    } finally {
+      setIsGuestLoading(false)
+    }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900 px-4 py-12 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">Sign In</CardTitle>
-          <CardDescription className="text-center">Enter your credentials to access your account</CardDescription>
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-2xl font-bold text-center">Sign in</CardTitle>
+          <CardDescription className="text-center">Choose your preferred sign in method</CardDescription>
         </CardHeader>
-        <CardContent>
-          {serverError && (
-            <Alert className="mb-4 bg-red-50 text-red-800">
+        <CardContent className="space-y-4">
+          <EnvChecker />
+
+          {error && (
+            <Alert variant="destructive">
               <AlertCircle className="h-4 w-4 mr-2" />
-              <AlertDescription>{serverError}</AlertDescription>
+              <AlertDescription>
+                {error}
+                {debugInfo && process.env.NODE_ENV !== "production" && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs font-medium">Technical details</summary>
+                    <pre className="mt-1 text-xs overflow-auto p-2 bg-red-50 rounded">{debugInfo}</pre>
+                  </details>
+                )}
+              </AlertDescription>
             </Alert>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="identifier" className="block text-sm font-medium text-gray-700">
-                  Username or Email
-                </Label>
-                {hasError("identifier") && <span className="text-xs text-red-600">{validationErrors.identifier}</span>}
-              </div>
-              <div className="relative mt-1">
-                <Input
-                  id="identifier"
-                  name="identifier"
-                  type="text"
-                  value={signInData.identifier}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  placeholder="Enter your username or email"
-                  className={`${
-                    hasError("identifier")
-                      ? "border-red-500 pr-10"
-                      : isValid("identifier")
-                        ? "border-green-500 pr-10"
-                        : ""
-                  }`}
-                  aria-invalid={hasError("identifier")}
-                  aria-describedby={hasError("identifier") ? "identifier-error" : undefined}
-                />
-                {hasError("identifier") && (
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <AlertCircle className="h-5 w-5 text-red-500" />
-                  </div>
-                )}
-                {isValid("identifier") && (
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                  </div>
-                )}
-              </div>
-              {hasError("identifier") && (
-                <p className="mt-1 text-xs text-red-600" id="identifier-error">
-                  {validationErrors.identifier}
-                </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              onClick={() => handleSocialLogin("google")}
+              disabled={isPending || !!isSocialLoading}
+              className="flex items-center justify-center gap-2"
+            >
+              {isSocialLoading === "google" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FcGoogle className="h-5 w-5" />
               )}
+              Google
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleSocialLogin("github")}
+              disabled={isPending || !!isSocialLoading}
+              className="flex items-center justify-center gap-2"
+            >
+              {isSocialLoading === "github" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FaGithub className="h-5 w-5" />
+              )}
+              GitHub
+            </Button>
+          </div>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Or continue with email</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                disabled={isPending}
+              />
             </div>
 
-            <div>
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                  Password
-                </Label>
-                <Link
-                  href="/auth/reset-password/request"
-                  className="text-sm font-medium text-blue-600 hover:text-blue-500"
-                >
+                <Label htmlFor="password">Password</Label>
+                <Link href="/auth/reset-password/request" className="text-sm font-medium text-primary hover:underline">
                   Forgot password?
                 </Link>
               </div>
-              <div className="relative mt-1">
-                <Input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  value={signInData.password}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  placeholder="Enter your password"
-                  className={`${
-                    hasError("password") ? "border-red-500" : isValid("password") ? "border-green-500" : ""
-                  }`}
-                  aria-invalid={hasError("password")}
-                  aria-describedby={hasError("password") ? "password-error" : undefined}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full px-3"
-                  onClick={togglePasswordVisibility}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              {hasError("password") && (
-                <p className="mt-1 text-xs text-red-600" id="password-error">
-                  {validationErrors.password}
-                </p>
-              )}
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={isPending}
+              />
             </div>
 
             <div className="flex items-center space-x-2">
               <Checkbox
-                id="remember-me"
+                id="remember"
                 checked={rememberMe}
                 onCheckedChange={(checked) => setRememberMe(checked === true)}
+                disabled={isPending}
               />
               <Label
-                htmlFor="remember-me"
+                htmlFor="remember"
                 className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
               >
-                Remember me for 30 days
+                Remember me
               </Label>
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? (
+            <Button type="submit" className="w-full" disabled={isPending}>
+              {isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Signing in...
                 </>
               ) : (
-                "Sign In"
+                <>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Sign in with Email
+                </>
               )}
             </Button>
           </form>
+
+          <Separator />
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleGuestMode}
+            className="w-full"
+            disabled={isGuestLoading || isPending}
+          >
+            {isGuestLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading guest mode...
+              </>
+            ) : (
+              "Continue as Guest"
+            )}
+          </Button>
+
+          <div className="text-center">
+            <Link href="/admin/create-default-user" className="text-sm text-blue-600 hover:underline">
+              Create Default User
+            </Link>
+            {" | "}
+            <Link href="/auth/debug" className="text-sm text-blue-600 hover:underline">
+              Debug Auth
+            </Link>
+          </div>
         </CardContent>
         <CardFooter className="flex justify-center">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             Don't have an account?{" "}
-            <Link href="/auth/register" className="font-medium text-blue-600 hover:text-blue-500">
-              Register
+            <Link href="/auth/register" className="font-medium text-primary hover:underline">
+              Sign up
             </Link>
           </p>
         </CardFooter>

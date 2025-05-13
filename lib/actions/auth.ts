@@ -1,9 +1,10 @@
 "use server"
-import { supabase } from "@/lib/database"
+
 import { cookies } from "next/headers"
 import { createServerClient } from "@supabase/ssr"
 import { recordSession } from "./sessions"
 import { headers } from "next/headers"
+import { validateInvitationToken } from "./invitations"
 
 // Constants for session durations
 const DEFAULT_SESSION_LENGTH = 3600 // 1 hour in seconds
@@ -11,15 +12,52 @@ const EXTENDED_SESSION_LENGTH = 2592000 // 30 days in seconds
 
 // Helper function to ensure responses are serializable
 function createResponse(success: boolean, data?: any, errorMessage?: string) {
-  if (success) {
-    return { success: true, ...(data || {}) }
-  } else {
-    return { success: false, error: errorMessage || "An error occurred" }
+  // Ensure we're returning a plain object that can be serialized
+  return {
+    success: success,
+    data: data || null,
+    error: errorMessage || null,
+  }
+}
+
+// Helper function to create a Supabase client
+function createSupabaseClient() {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error("Missing Supabase environment variables")
+      return null
+    }
+
+    const cookieStore = cookies()
+    return createServerClient(supabaseUrl, supabaseKey, {
+      cookies: {
+        get: (name) => {
+          return cookieStore.get(name)?.value
+        },
+        set: (name, value, options) => {
+          cookieStore.set({ name, value, ...options })
+        },
+        remove: (name, options) => {
+          cookieStore.set({ name, value: "", ...options })
+        },
+      },
+    })
+  } catch (error) {
+    console.error("Error creating Supabase client:", error)
+    return null
   }
 }
 
 export async function signUp(formData: FormData) {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     const email = formData.get("email") as string
     const password = formData.get("password") as string
     const fullName = formData.get("name") as string
@@ -41,16 +79,21 @@ export async function signUp(formData: FormData) {
       return createResponse(false, null, error.message)
     }
 
-    return createResponse(true, { user: data.user })
-  } catch (error) {
+    return createResponse(true, { user: data.user }, null)
+  } catch (error: any) {
     console.error("Error in signUp:", error)
-    return createResponse(false, null, "An unexpected error occurred during sign up")
+    return createResponse(false, null, error?.message || "An unexpected error occurred during sign up")
   }
 }
 
 // New function for sign-in with remember me option
 export async function signInWithRememberMe(formData: FormData) {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     const identifier = formData.get("identifier") as string
     const password = formData.get("password") as string
     const rememberMe = formData.get("rememberMe") === "true"
@@ -65,45 +108,24 @@ export async function signInWithRememberMe(formData: FormData) {
 
     console.log(`Signing in with ${rememberMe ? "extended" : "default"} session (${expiresIn} seconds)`)
 
-    // Create a server client with cookies
-    const cookieStore = cookies()
+    // Check if identifier is an email
+    const isEmail = identifier.includes("@")
+    let authResponse
+    let userEmail = ""
 
     try {
-      const supabaseServer = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            get: (name) => {
-              return cookieStore.get(name)?.value
-            },
-            set: (name, value, options) => {
-              cookieStore.set({ name, value, ...options })
-            },
-            remove: (name, options) => {
-              cookieStore.set({ name, value: "", ...options })
-            },
-          },
-        },
-      )
-
-      // Check if identifier is an email
-      const isEmail = identifier.includes("@")
-      let authResponse
-      let userEmail = ""
-
       if (isEmail) {
         // Sign in with email
         console.log(`Attempting login with email: ${identifier}`)
         userEmail = identifier
-        authResponse = await supabaseServer.auth.signInWithPassword({
+        authResponse = await supabase.auth.signInWithPassword({
           email: identifier,
           password,
         })
       } else {
         // Sign in with username - first get the email associated with the username
         console.log(`Attempting login with username: ${identifier}`)
-        const { data: userData, error: userError } = await supabaseServer
+        const { data: userData, error: userError } = await supabase
           .from("profiles")
           .select("email")
           .eq("username", identifier)
@@ -118,7 +140,7 @@ export async function signInWithRememberMe(formData: FormData) {
         console.log(`Found email for username ${identifier}: ${userEmail}`)
 
         // Now sign in with the email
-        authResponse = await supabaseServer.auth.signInWithPassword({
+        authResponse = await supabase.auth.signInWithPassword({
           email: userEmail,
           password,
         })
@@ -135,7 +157,7 @@ export async function signInWithRememberMe(formData: FormData) {
       console.log("Session created:", !!data.session)
 
       // Check if a profile exists for this user, create one if it doesn't
-      const { count } = await supabaseServer
+      const { count } = await supabase
         .from("profiles")
         .select("*", { count: "exact", head: true })
         .eq("id", data.user.id)
@@ -143,7 +165,7 @@ export async function signInWithRememberMe(formData: FormData) {
       if (count === 0) {
         console.log("No profile found for user, creating one")
         // Create a basic profile for the user
-        const { error: profileError } = await supabaseServer.from("profiles").insert({
+        const { error: profileError } = await supabase.from("profiles").insert({
           id: data.user.id,
           email: userEmail,
           full_name: data.user.user_metadata.full_name || "User",
@@ -162,7 +184,7 @@ export async function signInWithRememberMe(formData: FormData) {
       // If remember me is checked, extend the session
       if (rememberMe && data.session) {
         // We need to create a new session with the extended expiration
-        const { error: refreshError } = await supabaseServer.auth.refreshSession({
+        const { error: refreshError } = await supabase.auth.refreshSession({
           refresh_token: data.session.refresh_token,
           expiresIn,
         })
@@ -177,24 +199,29 @@ export async function signInWithRememberMe(formData: FormData) {
 
       // Update last login time
       if (data.user) {
-        await supabaseServer.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", data.user.id)
+        await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", data.user.id)
 
         // Record the session
         const headersList = headers()
         const userAgent = headersList.get("user-agent") || "Unknown"
         const ipAddress = headersList.get("x-forwarded-for") || headersList.get("x-real-ip") || "Unknown"
 
-        await recordSession(data.user.id, userAgent, ipAddress, expiresAt, rememberMe)
+        try {
+          await recordSession(data.user.id, userAgent, ipAddress, expiresAt, rememberMe)
+        } catch (sessionError) {
+          console.error("Error recording session:", sessionError)
+          // Continue anyway, as the user is still logged in
+        }
       }
 
-      return createResponse(true, { user: data.user })
-    } catch (supabaseError) {
-      console.error("Supabase client error:", supabaseError)
-      return createResponse(false, null, "Authentication service error. Please try again later.")
+      return createResponse(true, { user: data.user }, null)
+    } catch (authError: any) {
+      console.error("Authentication error:", authError)
+      return createResponse(false, null, authError?.message || "Authentication failed")
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Unexpected error during sign in:", error)
-    return createResponse(false, null, "An unexpected error occurred during sign in")
+    return createResponse(false, null, error?.message || "An unexpected error occurred during sign in")
   }
 }
 
@@ -208,30 +235,41 @@ export async function signIn(formData: FormData) {
     }
     newFormData.append("rememberMe", "false")
     return await signInWithRememberMe(newFormData)
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error in signIn:", error)
-    return createResponse(false, null, "An unexpected error occurred during sign in")
+    return createResponse(false, null, error?.message || "An unexpected error occurred during sign in")
   }
 }
 
 // Update the signOut function to properly clear the session
 export async function signOut() {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     const { error } = await supabase.auth.signOut()
 
     if (error) {
       return createResponse(false, null, error.message)
     }
 
-    return createResponse(true)
-  } catch (error) {
+    return createResponse(true, null, null)
+  } catch (error: any) {
     console.error("Error signing out:", error)
-    return createResponse(false, null, "Failed to sign out")
+    return createResponse(false, null, error?.message || "Failed to sign out")
   }
 }
 
 export async function getSession() {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      console.error("Supabase client not available in getSession")
+      return null
+    }
+
     const { data, error } = await supabase.auth.getSession()
 
     if (error || !data.session) {
@@ -248,8 +286,13 @@ export async function getSession() {
 export async function getUserProfile() {
   try {
     const session = await getSession()
-
     if (!session) {
+      return null
+    }
+
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      console.error("Supabase client not available in getUserProfile")
       return null
     }
 
@@ -291,6 +334,11 @@ export async function registerWithInvitation(
   },
 ) {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     // Validate the invitation token
     const invitation = await validateInvitationToken(token)
 
@@ -321,9 +369,9 @@ export async function registerWithInvitation(
     // Mark the invitation as used
     await supabase.from("invitations").update({ used_at: new Date().toISOString() }).eq("id", invitation.id)
 
-    return createResponse(true)
-  } catch (error) {
-    return createResponse(false, null, "Invalid or expired invitation")
+    return createResponse(true, null, null)
+  } catch (error: any) {
+    return createResponse(false, null, error?.message || "Invalid or expired invitation")
   }
 }
 
@@ -344,6 +392,11 @@ export async function getCurrentUser() {
 // Password reset request function
 export async function requestPasswordReset(email: string) {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     if (!email) {
       return createResponse(false, null, "Email is required")
     }
@@ -358,7 +411,7 @@ export async function requestPasswordReset(email: string) {
     if (userError) {
       // Don't reveal if the email exists or not for security reasons
       console.log("User lookup error:", userError)
-      return createResponse(true) // Return success even if email doesn't exist
+      return createResponse(true, null, null) // Return success even if email doesn't exist
     }
 
     // Use Supabase's built-in password reset functionality
@@ -371,16 +424,21 @@ export async function requestPasswordReset(email: string) {
       return createResponse(false, null, "Failed to send password reset email. Please try again later.")
     }
 
-    return createResponse(true)
-  } catch (error) {
+    return createResponse(true, null, null)
+  } catch (error: any) {
     console.error("Unexpected error during password reset request:", error)
-    return createResponse(false, null, "An unexpected error occurred. Please try again later.")
+    return createResponse(false, null, error?.message || "An unexpected error occurred. Please try again later.")
   }
 }
 
 // Password reset confirmation function
 export async function confirmPasswordReset(token: string, newPassword: string) {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     if (!token || !newPassword) {
       return createResponse(false, null, "Token and new password are required")
     }
@@ -395,15 +453,20 @@ export async function confirmPasswordReset(token: string, newPassword: string) {
       return createResponse(false, null, "Failed to reset password. The link may have expired.")
     }
 
-    return createResponse(true)
-  } catch (error) {
+    return createResponse(true, null, null)
+  } catch (error: any) {
     console.error("Unexpected error during password reset confirmation:", error)
-    return createResponse(false, null, "An unexpected error occurred. Please try again later.")
+    return createResponse(false, null, error?.message || "An unexpected error occurred. Please try again later.")
   }
 }
 
 export async function directLogin(email: string, password: string) {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
@@ -414,16 +477,21 @@ export async function directLogin(email: string, password: string) {
       return createResponse(false, null, error.message)
     }
 
-    return createResponse(true, { data })
-  } catch (error) {
+    return createResponse(true, { data }, null)
+  } catch (error: any) {
     console.error("Unexpected error during direct login:", error)
-    return createResponse(false, null, "An unexpected error occurred. Please try again later.")
+    return createResponse(false, null, error?.message || "An unexpected error occurred. Please try again later.")
   }
 }
 
 // Add this function to the file, near the other auth-related functions
 export async function ensureUserProfile(userId: string, email: string) {
   try {
+    const supabase = createSupabaseClient()
+    if (!supabase) {
+      return createResponse(false, null, "Authentication service unavailable")
+    }
+
     const { count } = await supabase.from("profiles").select("*", { count: "exact", head: true }).eq("id", userId)
 
     if (count === 0) {
@@ -438,12 +506,19 @@ export async function ensureUserProfile(userId: string, email: string) {
         created_at: new Date().toISOString(),
       })
     }
-    return createResponse(true)
-  } catch (error) {
+    return createResponse(true, null, null)
+  } catch (error: any) {
     console.error("Error ensuring user profile:", error)
-    return createResponse(false, null, "Failed to create user profile")
+    return createResponse(false, null, error?.message || "Failed to create user profile")
   }
 }
 
-// Import this at the top of the file
-import { validateInvitationToken } from "./invitations"
+// Add a function to enable guest mode
+export async function enableGuestMode() {
+  return createResponse(true, { guestMode: true }, null)
+}
+
+// Add a function to disable guest mode
+export async function disableGuestMode() {
+  return createResponse(true, { guestMode: false }, null)
+}

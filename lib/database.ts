@@ -104,19 +104,46 @@ export interface UserActivity {
   created_at: string
 }
 
-// Check if the required environment variables are available
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+// Create a function to get the Supabase client
+// This allows us to handle missing environment variables gracefully
+let supabaseInstance: ReturnType<typeof createClient<Database>> | null = null
 
-if (!supabaseUrl) {
-  console.error("NEXT_PUBLIC_SUPABASE_URL is not defined")
+export function getSupabaseClient() {
+  // If we already have an instance, return it
+  if (supabaseInstance) {
+    return supabaseInstance
+  }
+
+  // Check if the required environment variables are available
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  // Log missing environment variables
+  if (!supabaseUrl) {
+    console.error("NEXT_PUBLIC_SUPABASE_URL is not defined")
+  }
+
+  if (!supabaseAnonKey) {
+    console.error("NEXT_PUBLIC_SUPABASE_ANON_KEY is not defined")
+  }
+
+  // Only create the client if both URL and key are available
+  if (supabaseUrl && supabaseAnonKey) {
+    try {
+      supabaseInstance = createClient<Database>(supabaseUrl, supabaseAnonKey)
+      console.log("Supabase client initialized successfully")
+      return supabaseInstance
+    } catch (error) {
+      console.error("Failed to initialize Supabase client:", error)
+      throw new Error("Failed to initialize Supabase client. Check your environment variables.")
+    }
+  } else {
+    throw new Error("Supabase URL and API key are required. Please check your environment variables.")
+  }
 }
 
-if (!supabaseAnonKey) {
-  console.error("NEXT_PUBLIC_SUPABASE_ANON_KEY is not defined")
-}
-
-// Create a single supabase client for interacting with your database
-export const supabase = createClient<Database>(supabaseUrl || "", supabaseAnonKey || "")
+// Export a dummy client for type compatibility
+// This will be replaced with the actual client when getSupabaseClient is called
+export const supabase = {} as ReturnType<typeof createClient<Database>>
 
 export type { Memory, UserActivity, ScrapingTask, ScrapingResult, TaskRating }
