@@ -7,6 +7,8 @@ import { redirect } from "next/navigation"
 // Helper function to create a Supabase server client
 function getSupabaseServer() {
   const cookieStore = cookies()
+
+  // Create the client with explicit error handling
   return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       get(name) {
@@ -17,6 +19,22 @@ function getSupabaseServer() {
       },
       remove(name, options) {
         cookieStore.set({ name, value: "", ...options })
+      },
+    },
+    // Add global error handler for fetch operations
+    global: {
+      fetch: async (url, options) => {
+        try {
+          const response = await fetch(url, options)
+          return response
+        } catch (error) {
+          console.error("Fetch error in Supabase client:", error)
+          // Return a properly formatted error response
+          return new Response(JSON.stringify({ error: "Authentication service unavailable" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          })
+        }
       },
     },
   })

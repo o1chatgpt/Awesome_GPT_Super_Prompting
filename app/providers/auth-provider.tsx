@@ -44,11 +44,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null)
   const router = useRouter()
 
-  // Create the Supabase client with explicit URL and key
-  const supabase = createClientComponentClient({
-    supabaseUrl: "https://your-project-url.supabase.co",
-    supabaseKey: "your-anon-key",
-  })
+  // Create the Supabase client
+  const supabase = createClientComponentClient()
 
   // Fetch user profile
   const fetchProfile = async (userId: string) => {
@@ -177,7 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log("No session found")
 
         // Check if user is in guest mode
-        const guestMode = localStorage.getItem("guestMode") === "true"
+        const guestMode = typeof window !== "undefined" && localStorage.getItem("guestMode") === "true"
 
         if (guestMode) {
           console.log("Guest mode active")
@@ -213,7 +210,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(null)
       setSession(null)
       setIsGuest(false)
-      localStorage.removeItem("guestMode")
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("guestMode")
+      }
 
       router.push("/auth/sign-in")
     } catch (error) {
@@ -225,7 +225,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Enable guest mode
   const enableGuestMode = () => {
     console.log("Enabling guest mode")
-    localStorage.setItem("guestMode", "true")
+    if (typeof window !== "undefined") {
+      localStorage.setItem("guestMode", "true")
+    }
     setIsGuest(true)
     setAuthError(null)
 
@@ -246,7 +248,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Disable guest mode
   const disableGuestMode = () => {
     console.log("Disabling guest mode")
-    localStorage.removeItem("guestMode")
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("guestMode")
+    }
     setIsGuest(false)
     setProfile(null)
     router.push("/auth/sign-in")
@@ -255,6 +259,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Initialize auth state
   useEffect(() => {
     console.log("Initializing auth provider...")
+
+    // Check if environment variables are available
+    if (typeof window !== "undefined") {
+      console.log("NEXT_PUBLIC_SUPABASE_URL available:", !!process.env.NEXT_PUBLIC_SUPABASE_URL)
+      console.log("NEXT_PUBLIC_SUPABASE_ANON_KEY available:", !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    }
+
     refreshSession()
 
     // Set up auth state change listener
@@ -269,7 +280,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setSession(newSession)
           setUser(newSession.user)
           setIsGuest(false)
-          localStorage.removeItem("guestMode")
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("guestMode")
+          }
 
           // Ensure profile exists and fetch it
           const profile = await ensureProfile(newSession.user)
